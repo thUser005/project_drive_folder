@@ -159,23 +159,37 @@ def api_convert():
     if not file_id:
         return jsonify({"error": "fileId required"}), 400
 
-    meta = drive_file_metadata(file_id)
-    modified_time = meta.get("modifiedTime") or meta.get("createdTime")
-
-    key = make_cache_key(file_id, modified_time)
-    cached = CACHE_DIR / f"{key}.mp3"
-
-    if cached.exists():
-        return send_file(cached, mimetype="audio/mpeg")
-
-    with ongoing_lock:
-        fut = ongoing.get(key)
-        if not fut:
-            fut = executor.submit(convert_and_cache, file_id)
-            ongoing[key] = fut
+    print("▶️ Convert request for:", file_id, flush=True)
 
     try:
-        return send_file(fut.result(), mimetype="audio/mpeg")
+        meta = drive_file_metadata(file_id)
+        print("📄 Metadata:", meta, flush=True)
+
+        modified_time = meta.get("modifiedTime") or meta.get("createdTime")
+        key = make_cache_key(file_id, modified_time)
+        cached = CACHE_DIR / f"{key}.mp3"
+
+        if cached.exists():
+            print("⚡ Cache hit", flush=True)
+            return send_file(cached, mimetype="audio/mpeg")
+
+        with ongoing_lock:
+            fut = ongoing.get(key)
+            if not fut:
+                print("🚀 Submitting conversion job", flush=True)
+                fut = executor.submit(convert_and_cache, file_id)
+                ongoing[key] = fut
+
+        result = fut.result()
+        print("✅ Conversion done:", result, flush=True)
+        return send_file(result, mimetype="audio/mpeg")
+
+    except Exception as e:
+        print("🔥 ERROR:", str(e), flush=True)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
     finally:
         with ongoing_lock:
             ongoing.pop(key, None)
